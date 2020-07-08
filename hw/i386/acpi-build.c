@@ -75,6 +75,8 @@
 #include "hw/acpi/ipmi.h"
 #include "hw/acpi/hmat.h"
 
+#include "hw/acpi/cxl.h"
+
 /* These are used to size the ACPI tables for -M pc-i440fx-1.7 and
  * -M pc-i440fx-2.0.  Even if the actual amount of AML generated grows
  * a little bit, there should be plenty of free space since the DSDT
@@ -1271,6 +1273,19 @@ static void init_pci_acpi(Aml *dev, int uid, int type)
     }
 }
 
+static void build_acpi0017(Aml *table)
+{
+    Aml *dev;
+    Aml *scope;
+
+    scope =  aml_scope("_SB");
+    dev = aml_device("CXLM");
+    aml_append(dev, aml_name_decl("_HID", aml_string("ACPI0017")));
+
+    aml_append(scope, dev);
+    aml_append(table, scope);
+}
+
 static void
 build_dsdt(GArray *table_data, BIOSLinker *linker,
            AcpiPmInfo *pm, AcpiMiscInfo *misc,
@@ -1288,6 +1303,7 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
     int root_bus_limit = 0xFF;
     PCIBus *bus = NULL;
     TPMIf *tpm = tpm_find();
+    bool cxl_present = false;
     int i;
     VMBusBridge *vmbus_bridge = vmbus_bridge_find();
 
@@ -1431,7 +1447,7 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
 
             scope = aml_scope("\\_SB");
             if (type == CXL) {
-                dev = aml_device("CXL%.01X", pci_bus_uid(bus));
+                dev = aml_device("CXL%.01X", uid);
             } else {
                 dev = aml_device("PC%.02X", bus_num);
             }
@@ -1451,11 +1467,16 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
 
             /* Handle the ranges for the PXB expanders */
             if (type == CXL) {
+                cxl_present = true;
                 uint64_t base = CXL_HOST_BASE + uid * 0x10000;
                 crs_range_insert(crs_range_set.mem_ranges, base,
                                  base + 0x10000 - 1);
             }
         }
+    }
+
+    if (cxl_present) {
+        build_acpi0017(dsdt);
     }
 
     /*
@@ -2367,6 +2388,9 @@ void acpi_build(AcpiBuildTables *tables, MachineState *machine)
                           machine->nvdimms_state, machine->ram_slots,
                           pcms->oem_id, pcms->oem_table_id);
     }
+
+    cxl_build_cedt(table_offsets, tables_blob, tables->linker,
+                   pcms->oem_id, pcms->oem_table_id);
 
     acpi_add_table(table_offsets, tables_blob);
     build_waet(tables_blob, tables->linker, pcms->oem_id, pcms->oem_table_id);
