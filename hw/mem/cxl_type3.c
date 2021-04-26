@@ -121,12 +121,57 @@ bool cxl_doe_compliance_rsp(DOECap *doe_cap)
     return true;
 }
 
+bool cxl_doe_cdat_rsp(DOECap *doe_cap)
+{
+    CDATObject *cdat = &CT3(doe_cap->pdev)->cxl_cstate.cdat;
+    uint16_t ent;
+    void *base;
+    uint32_t len;
+    struct cxl_cdat_req *req = pcie_doe_get_write_mbox_ptr(doe_cap);
+    struct cxl_cdat_rsp rsp;
+
+    assert(cdat->entry_len);
+
+    /* Discard if request length mismatched */
+    if (pcie_doe_get_obj_len(req) <
+        DIV_ROUND_UP(sizeof(struct cxl_cdat_req), DWORD_BYTE)) {
+        return false;
+    }
+
+    ent = req->entry_handle;
+    base = cdat->entry[ent].base;
+    len = cdat->entry[ent].length;
+
+    rsp = (struct cxl_cdat_rsp) {
+        .header = {
+            .vendor_id = CXL_VENDOR_ID,
+            .data_obj_type = CXL_DOE_TABLE_ACCESS,
+            .reserved = 0x0,
+            .length = DIV_ROUND_UP((sizeof(rsp) + len), DWORD_BYTE),
+        },
+        .rsp_code = CXL_DOE_TAB_RSP,
+        .table_type = CXL_DOE_TAB_TYPE_CDAT,
+        .entry_handle = (ent < cdat->entry_len - 1) ?
+                        ent + 1 : CXL_DOE_TAB_ENT_MAX,
+    };
+
+    memcpy(doe_cap->read_mbox, &rsp, sizeof(rsp));
+    memcpy(doe_cap->read_mbox + DIV_ROUND_UP(sizeof(rsp), DWORD_BYTE),
+           base, len);
+
+    doe_cap->read_mbox_len += rsp.header.length;
+
+    return true;
+}
+
 static uint32_t ct3d_config_read(PCIDevice *pci_dev, uint32_t addr, int size)
 {
     CXLType3Dev *ct3d = CT3(pci_dev);
     uint32_t val;
 
     if (pcie_doe_read_config(&ct3d->doe_comp, addr, size, &val)) {
+        return val;
+    } else if (pcie_doe_read_config(&ct3d->doe_cdat, addr, size, &val)) {
         return val;
     }
 
@@ -139,6 +184,7 @@ static void ct3d_config_write(PCIDevice *pci_dev, uint32_t addr, uint32_t val,
     CXLType3Dev *ct3d = CT3(pci_dev);
 
     pcie_doe_write_config(&ct3d->doe_comp, addr, val, size);
+    pcie_doe_write_config(&ct3d->doe_cdat, addr, val, size);
     pci_default_write_config(pci_dev, addr, val, size);
 }
 
@@ -337,6 +383,11 @@ static DOEProtocol doe_comp_prot[] = {
     {},
 };
 
+static DOEProtocol doe_cdat_prot[] = {
+    {CXL_VENDOR_ID, CXL_DOE_TABLE_ACCESS, cxl_doe_cdat_rsp},
+    {},
+};
+
 static void ct3_realize(PCIDevice *pci_dev, Error **errp)
 {
     CXLType3Dev *ct3d = CT3(pci_dev);
@@ -344,7 +395,7 @@ static void ct3_realize(PCIDevice *pci_dev, Error **errp)
     ComponentRegisters *regs = &cxl_cstate->crb;
     MemoryRegion *mr = &regs->component_registers;
     uint8_t *pci_conf = pci_dev->config;
-    unsigned short msix_num = 1;
+    unsigned short msix_num = 2;
     int i;
 
     if (!ct3d->cxl_dstate.pmem) {
@@ -384,6 +435,9 @@ static void ct3_realize(PCIDevice *pci_dev, Error **errp)
 
     /* DOE Initailization */
     pcie_doe_init(pci_dev, &ct3d->doe_comp, 0x160, doe_comp_prot, true, 0);
+    pcie_doe_init(pci_dev, &ct3d->doe_cdat, 0x190, doe_cdat_prot, true, 1);
+
+    cxl_doe_cdat_init(cxl_cstate, errp);
 }
 
 static uint64_t cxl_md_get_addr(const MemoryDeviceState *md)
@@ -420,6 +474,7 @@ static Property ct3_props[] = {
                      HostMemoryBackend *),
     DEFINE_PROP_LINK("lsa", CXLType3Dev, lsa, TYPE_MEMORY_BACKEND,
                      HostMemoryBackend *),
+    DEFINE_PROP_STRING("cdat", CXLType3Dev, cxl_cstate.cdat.filename),
     DEFINE_PROP_END_OF_LIST(),
 };
 
