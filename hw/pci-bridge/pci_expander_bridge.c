@@ -228,7 +228,7 @@ static void pxb_cxl_realize(DeviceState *dev, Error **errp)
      */
     mr = host_memory_backend_get_memory(cxl_dev->memory_window[0]);
     sysbus_init_mmio(sbd, mr);
-    sysbus_mmio_map(sbd, 0, *cxl_dev->window_base[0]);
+    sysbus_mmio_map(sbd, 1, *cxl_dev->window_base[0]);
 }
 
 static void pxb_cxl_host_class_init(ObjectClass *class, void *data)
@@ -292,6 +292,15 @@ static int pxb_map_irq_fn(PCIDevice *pci_dev, int pin)
      * pxb's effect.
      */
     return pin - PCI_SLOT(pxb->devfn);
+}
+
+static void pxb_dev_reset(DeviceState *dev)
+{
+    CXLHost *cxl = PXB_CXL_HOST(dev);
+    CXLComponentState *cxl_cstate = &cxl->cxl_cstate;
+    uint32_t *reg_state = cxl_cstate->crb.cache_mem_registers;
+
+    cxl_component_register_init_common(reg_state, CXL2_ROOT_PORT);
 }
 
 static gint pxb_compare(gconstpointer a, gconstpointer b)
@@ -367,6 +376,9 @@ static void pxb_dev_realize_common(PCIDevice *dev, enum BusType type,
     pci_config_set_class(dev->config, PCI_CLASS_BRIDGE_HOST);
 
     pxb_dev_list = g_list_insert_sorted(pxb_dev_list, pxb, pxb_compare);
+
+    pxb_dev_reset(ds);
+
     return;
 
 err_register_bus:
@@ -417,6 +429,12 @@ static void pxb_dev_class_init(ObjectClass *klass, void *data)
     device_class_set_props(dc, pxb_dev_properties);
     dc->hotpluggable = false;
     set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
+
+    /*
+     * Reset doesn't seem to actually be called, but maybe it will in the
+     * future?
+     */
+    dc->reset = pxb_dev_reset;
 }
 
 static const TypeInfo pxb_dev_info = {
