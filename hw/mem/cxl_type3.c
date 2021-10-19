@@ -55,7 +55,7 @@ static void hdm_decoder_commit(CXLType3Dev *ct3d, int which)
     MemoryRegion *mr = host_memory_backend_get_memory(ct3d->hostmem);
     Range window, device;
     ComponentRegisters *cregs = &ct3d->cxl_cstate.crb;
-    uint32_t *cache_mem = cregs->cache_mem_registers;
+    uint32_t ways, *cache_mem = cregs->cache_mem_registers;
     uint64_t offset, size;
     Error *err = NULL;
 
@@ -68,9 +68,10 @@ static void hdm_decoder_commit(CXLType3Dev *ct3d, int which)
              cache_mem[R_CXL_HDM_DECODER0_BASE_LO];
     size = ((uint64_t)cache_mem[R_CXL_HDM_DECODER0_SIZE_HI] << 32) |
            cache_mem[R_CXL_HDM_DECODER0_SIZE_LO];
+    ways = 1 << ARRAY_FIELD_EX32(cache_mem, CXL_HDM_DECODER0_CTRL, IW);
 
     range_init_nofail(&window, mr->addr, memory_region_size(mr));
-    range_init_nofail(&device, offset, size);
+    range_init_nofail(&device, offset, size / ways);
 
     if (!range_contains_range(&window, &device)) {
         ARRAY_FIELD_DP32(cache_mem, CXL_HDM_DECODER0_CTRL, ERROR, 1);
@@ -81,7 +82,7 @@ static void hdm_decoder_commit(CXLType3Dev *ct3d, int which)
      * FIXME: Support resizing.
      * Maybe just memory_region_ram_resize(pmem, size, &err)?
      */
-    if (size != memory_region_size(pmem)) {
+    if ((size  / ways) != memory_region_size(pmem)) {
         ARRAY_FIELD_DP32(cache_mem, CXL_HDM_DECODER0_CTRL, ERROR, 1);
         return;
     }
