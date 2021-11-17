@@ -198,7 +198,11 @@ static void build_dvsecs(CXLType3Dev *ct3d)
         .ctrl = 0x6,
         .status2 = 0x2,
         .range1_size_hi = 0,
+#ifdef SET_PMEM_PADDR
         .range1_size_lo = (2 << 5) | (2 << 2) | 0x3 | ct3d->size,
+#else
+        .range1_size_lo = 0x3,
+#endif
         .range1_base_hi = 0,
         .range1_base_lo = 0,
     };
