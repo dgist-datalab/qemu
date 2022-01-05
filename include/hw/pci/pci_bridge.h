@@ -94,6 +94,7 @@ struct PXBDev {
     struct cxl_dev {
         HostMemoryBackend *memory_window[CXL_WINDOW_MAX];
 
+        uint8_t rp_nr;
         uint32_t num_windows;
         hwaddr *window_base[CXL_WINDOW_MAX];
 

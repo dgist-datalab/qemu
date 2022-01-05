@@ -299,8 +299,11 @@ static void pxb_dev_reset(DeviceState *dev)
     CXLHost *cxl = PXB_CXL_HOST(dev);
     CXLComponentState *cxl_cstate = &cxl->cxl_cstate;
     uint32_t *reg_state = cxl_cstate->crb.cache_mem_registers;
+    struct cxl_dev *cxl_dev = &cxl->dev->cxl;
 
     cxl_component_register_init_common(reg_state, CXL2_ROOT_PORT);
+
+    ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY, TARGET_COUNT, cxl_dev->rp_nr);
 }
 
 static gint pxb_compare(gconstpointer a, gconstpointer b)
@@ -411,6 +414,7 @@ static Property pxb_dev_properties[] = {
     DEFINE_PROP_INT32("uid", PXBDev, uid, -1),
     DEFINE_PROP_ARRAY("window-base", PXBDev, cxl.num_windows, cxl.window_base,
                       qdev_prop_uint64, hwaddr),
+    DEFINE_PROP_UINT8("root-ports", PXBDev, cxl.rp_nr, 1),
     DEFINE_PROP_END_OF_LIST(),
 };
 
