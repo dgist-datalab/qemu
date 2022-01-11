@@ -102,8 +102,10 @@ REG32(CXL_RAS_ERR_CAP_CTRL, CXL_RAS_REGISTERS_OFFSET + 0x14)
             FIELD(CXL_HDM_DECODER##n##_CTRL, COMMITTED, 10, 1)                 \
             FIELD(CXL_HDM_DECODER##n##_CTRL, ERROR, 11, 1)                     \
             FIELD(CXL_HDM_DECODER##n##_CTRL, TYPE, 12, 1)                      \
-  REG32(CXL_HDM_DECODER##n##_TARGET_LIST_LO, 0x24)                             \
-  REG32(CXL_HDM_DECODER##n##_TARGET_LIST_HI, 0x28)
+  REG32(CXL_HDM_DECODER##n##_TARGET_LIST_LO,                                   \
+          CXL_HDM_REGISTERS_OFFSET + (0x20 * n) + 0x20)                        \
+  REG32(CXL_HDM_DECODER##n##_TARGET_LIST_HI,                                   \
+          CXL_HDM_REGISTERS_OFFSET + (0x20 * n) + 0x20)
 
 REG32(CXL_HDM_DECODER_CAPABILITY, CXL_HDM_REGISTERS_OFFSET)
     FIELD(CXL_HDM_DECODER_CAPABILITY, DECODER_COUNT, 0, 4)
