@@ -295,9 +295,11 @@ static void ct3d_reg_write(void *opaque, hwaddr offset, uint64_t value, unsigned
         break;
     }
 
+    memory_region_transaction_begin();
     stl_le_p((uint8_t *)cache_mem + offset, value);
     if (should_commit)
         hdm_decoder_commit(ct3d, which_hdm);
+    memory_region_transaction_commit();
 }
 
 static void ct3_instance_init(Object *obj)
