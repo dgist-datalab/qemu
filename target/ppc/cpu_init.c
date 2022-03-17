@@ -43,7 +43,6 @@
 #include "fpu/softfloat.h"
 #include "qapi/qapi-commands-machine-target.h"
 
-#include "exec/helper-proto.h"
 #include "helper_regs.h"
 #include "internal.h"
 #include "spr_tcg.h"
@@ -1206,15 +1205,12 @@ static void register_BookE206_sprs(CPUPPCState *env, uint32_t mas_mask,
     /* TLB assist registers */
     /* XXX : not implemented */
     for (i = 0; i < 8; i++) {
-        void (*uea_write)(DisasContext *ctx, int sprn, int gprn) =
-            &spr_write_generic32;
-        if (i == 2 && (mas_mask & (1 << i)) && (env->insns_flags & PPC_64B)) {
-            uea_write = &spr_write_generic;
-        }
         if (mas_mask & (1 << i)) {
             spr_register(env, mas_sprn[i], mas_names[i],
                          SPR_NOACCESS, SPR_NOACCESS,
-                         &spr_read_generic, uea_write,
+                         &spr_read_generic,
+                         (i == 2 && (env->insns_flags & PPC_64B))
+                         ? &spr_write_generic : &spr_write_generic32,
                          0x00000000);
         }
     }
@@ -2669,18 +2665,6 @@ static int check_pow_hid0_74xx(CPUPPCState *env)
 
     return 0;
 }
-
-static bool ppc_cpu_interrupts_big_endian_always(PowerPCCPU *cpu)
-{
-    return true;
-}
-
-#ifdef TARGET_PPC64
-static bool ppc_cpu_interrupts_big_endian_lpcr(PowerPCCPU *cpu)
-{
-    return !(cpu->env.spr[SPR_LPCR] & LPCR_ILE);
-}
-#endif
 
 /*****************************************************************************/
 /* PowerPC implementations definitions                                       */
@@ -4582,9 +4566,6 @@ POWERPC_FAMILY(601)(ObjectClass *oc, void *data)
                     (1ull << MSR_IR) |
                     (1ull << MSR_DR);
     pcc->mmu_model = POWERPC_MMU_601;
-#if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash32_handle_mmu_fault;
-#endif
     pcc->excp_model = POWERPC_EXCP_601;
     pcc->bus_model = PPC_FLAGS_INPUT_6xx;
     pcc->bfd_mach = bfd_mach_ppc_601;
@@ -4627,9 +4608,6 @@ POWERPC_FAMILY(601v)(ObjectClass *oc, void *data)
                     (1ull << MSR_IR) |
                     (1ull << MSR_DR);
     pcc->mmu_model = POWERPC_MMU_601;
-#if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash32_handle_mmu_fault;
-#endif
     pcc->bus_model = PPC_FLAGS_INPUT_6xx;
     pcc->bfd_mach = bfd_mach_ppc_601;
     pcc->flags = POWERPC_FLAG_SE | POWERPC_FLAG_RTC_CLK | POWERPC_FLAG_HID0_LE;
@@ -4893,9 +4871,6 @@ POWERPC_FAMILY(604)(ObjectClass *oc, void *data)
                     (1ull << MSR_RI) |
                     (1ull << MSR_LE);
     pcc->mmu_model = POWERPC_MMU_32B;
-#if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash32_handle_mmu_fault;
-#endif
     pcc->excp_model = POWERPC_EXCP_604;
     pcc->bus_model = PPC_FLAGS_INPUT_6xx;
     pcc->bfd_mach = bfd_mach_ppc_604;
@@ -4977,9 +4952,6 @@ POWERPC_FAMILY(604E)(ObjectClass *oc, void *data)
                     (1ull << MSR_RI) |
                     (1ull << MSR_LE);
     pcc->mmu_model = POWERPC_MMU_32B;
-#if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash32_handle_mmu_fault;
-#endif
     pcc->excp_model = POWERPC_EXCP_604;
     pcc->bus_model = PPC_FLAGS_INPUT_6xx;
     pcc->bfd_mach = bfd_mach_ppc_604;
@@ -5048,9 +5020,6 @@ POWERPC_FAMILY(740)(ObjectClass *oc, void *data)
                     (1ull << MSR_RI) |
                     (1ull << MSR_LE);
     pcc->mmu_model = POWERPC_MMU_32B;
-#if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash32_handle_mmu_fault;
-#endif
     pcc->excp_model = POWERPC_EXCP_7x0;
     pcc->bus_model = PPC_FLAGS_INPUT_6xx;
     pcc->bfd_mach = bfd_mach_ppc_750;
@@ -5128,9 +5097,6 @@ POWERPC_FAMILY(750)(ObjectClass *oc, void *data)
                     (1ull << MSR_RI) |
                     (1ull << MSR_LE);
     pcc->mmu_model = POWERPC_MMU_32B;
-#if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash32_handle_mmu_fault;
-#endif
     pcc->excp_model = POWERPC_EXCP_7x0;
     pcc->bus_model = PPC_FLAGS_INPUT_6xx;
     pcc->bfd_mach = bfd_mach_ppc_750;
@@ -5331,9 +5297,6 @@ POWERPC_FAMILY(750cl)(ObjectClass *oc, void *data)
                     (1ull << MSR_RI) |
                     (1ull << MSR_LE);
     pcc->mmu_model = POWERPC_MMU_32B;
-#if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash32_handle_mmu_fault;
-#endif
     pcc->excp_model = POWERPC_EXCP_7x0;
     pcc->bus_model = PPC_FLAGS_INPUT_6xx;
     pcc->bfd_mach = bfd_mach_ppc_750;
@@ -5414,9 +5377,6 @@ POWERPC_FAMILY(750cx)(ObjectClass *oc, void *data)
                     (1ull << MSR_RI) |
                     (1ull << MSR_LE);
     pcc->mmu_model = POWERPC_MMU_32B;
-#if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash32_handle_mmu_fault;
-#endif
     pcc->excp_model = POWERPC_EXCP_7x0;
     pcc->bus_model = PPC_FLAGS_INPUT_6xx;
     pcc->bfd_mach = bfd_mach_ppc_750;
@@ -5502,9 +5462,6 @@ POWERPC_FAMILY(750fx)(ObjectClass *oc, void *data)
                     (1ull << MSR_RI) |
                     (1ull << MSR_LE);
     pcc->mmu_model = POWERPC_MMU_32B;
-#if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash32_handle_mmu_fault;
-#endif
     pcc->excp_model = POWERPC_EXCP_7x0;
     pcc->bus_model = PPC_FLAGS_INPUT_6xx;
     pcc->bfd_mach = bfd_mach_ppc_750;
@@ -5590,9 +5547,6 @@ POWERPC_FAMILY(750gx)(ObjectClass *oc, void *data)
                     (1ull << MSR_RI) |
                     (1ull << MSR_LE);
     pcc->mmu_model = POWERPC_MMU_32B;
-#if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash32_handle_mmu_fault;
-#endif
     pcc->excp_model = POWERPC_EXCP_7x0;
     pcc->bus_model = PPC_FLAGS_INPUT_6xx;
     pcc->bfd_mach = bfd_mach_ppc_750;
@@ -5832,9 +5786,6 @@ POWERPC_FAMILY(7400)(ObjectClass *oc, void *data)
                     (1ull << MSR_RI) |
                     (1ull << MSR_LE);
     pcc->mmu_model = POWERPC_MMU_32B;
-#if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash32_handle_mmu_fault;
-#endif
     pcc->excp_model = POWERPC_EXCP_74xx;
     pcc->bus_model = PPC_FLAGS_INPUT_6xx;
     pcc->bfd_mach = bfd_mach_ppc_7400;
@@ -5918,9 +5869,6 @@ POWERPC_FAMILY(7410)(ObjectClass *oc, void *data)
                     (1ull << MSR_RI) |
                     (1ull << MSR_LE);
     pcc->mmu_model = POWERPC_MMU_32B;
-#if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash32_handle_mmu_fault;
-#endif
     pcc->excp_model = POWERPC_EXCP_74xx;
     pcc->bus_model = PPC_FLAGS_INPUT_6xx;
     pcc->bfd_mach = bfd_mach_ppc_7400;
@@ -6747,9 +6695,6 @@ POWERPC_FAMILY(e600)(ObjectClass *oc, void *data)
                     (1ull << MSR_RI) |
                     (1ull << MSR_LE);
     pcc->mmu_model = POWERPC_MMU_32B;
-#if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash32_handle_mmu_fault;
-#endif
     pcc->excp_model = POWERPC_EXCP_74xx;
     pcc->bus_model = PPC_FLAGS_INPUT_6xx;
     pcc->bfd_mach = bfd_mach_ppc_7400;
@@ -7509,7 +7454,6 @@ POWERPC_FAMILY(970)(ObjectClass *oc, void *data)
                     (1ull << MSR_RI);
     pcc->mmu_model = POWERPC_MMU_64B;
 #if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash64_handle_mmu_fault;
     pcc->hash64_opts = &ppc_hash64_opts_basic;
 #endif
     pcc->excp_model = POWERPC_EXCP_970;
@@ -7587,7 +7531,6 @@ POWERPC_FAMILY(POWER5P)(ObjectClass *oc, void *data)
         LPCR_RMI | LPCR_HDICE;
     pcc->mmu_model = POWERPC_MMU_2_03;
 #if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash64_handle_mmu_fault;
     pcc->hash64_opts = &ppc_hash64_opts_basic;
     pcc->lrg_decr_bits = 32;
 #endif
@@ -7731,7 +7674,6 @@ POWERPC_FAMILY(POWER7)(ObjectClass *oc, void *data)
     pcc->lpcr_pm = LPCR_P7_PECE0 | LPCR_P7_PECE1 | LPCR_P7_PECE2;
     pcc->mmu_model = POWERPC_MMU_2_06;
 #if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash64_handle_mmu_fault;
     pcc->hash64_opts = &ppc_hash64_opts_POWER7;
     pcc->lrg_decr_bits = 32;
 #endif
@@ -7744,7 +7686,6 @@ POWERPC_FAMILY(POWER7)(ObjectClass *oc, void *data)
                  POWERPC_FLAG_VSX;
     pcc->l1_dcache_size = 0x8000;
     pcc->l1_icache_size = 0x8000;
-    pcc->interrupts_big_endian = ppc_cpu_interrupts_big_endian_lpcr;
 }
 
 static void init_proc_POWER8(CPUPPCState *env)
@@ -7908,7 +7849,6 @@ POWERPC_FAMILY(POWER8)(ObjectClass *oc, void *data)
                    LPCR_P8_PECE3 | LPCR_P8_PECE4;
     pcc->mmu_model = POWERPC_MMU_2_07;
 #if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc_hash64_handle_mmu_fault;
     pcc->hash64_opts = &ppc_hash64_opts_POWER7;
     pcc->lrg_decr_bits = 32;
     pcc->n_host_threads = 8;
@@ -7922,7 +7862,6 @@ POWERPC_FAMILY(POWER8)(ObjectClass *oc, void *data)
                  POWERPC_FLAG_VSX | POWERPC_FLAG_TM;
     pcc->l1_dcache_size = 0x8000;
     pcc->l1_icache_size = 0x8000;
-    pcc->interrupts_big_endian = ppc_cpu_interrupts_big_endian_lpcr;
 }
 
 #ifdef CONFIG_SOFTMMU
@@ -8124,7 +8063,6 @@ POWERPC_FAMILY(POWER9)(ObjectClass *oc, void *data)
     pcc->lpcr_pm = LPCR_PDEE | LPCR_HDEE | LPCR_EEE | LPCR_DEE | LPCR_OEE;
     pcc->mmu_model = POWERPC_MMU_3_00;
 #if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc64_v3_handle_mmu_fault;
     /* segment page size remain the same */
     pcc->hash64_opts = &ppc_hash64_opts_POWER7;
     pcc->radix_page_info = &POWER9_radix_page_info;
@@ -8140,7 +8078,6 @@ POWERPC_FAMILY(POWER9)(ObjectClass *oc, void *data)
                  POWERPC_FLAG_VSX | POWERPC_FLAG_TM | POWERPC_FLAG_SCV;
     pcc->l1_dcache_size = 0x8000;
     pcc->l1_icache_size = 0x8000;
-    pcc->interrupts_big_endian = ppc_cpu_interrupts_big_endian_lpcr;
 }
 
 #ifdef CONFIG_SOFTMMU
@@ -8336,7 +8273,6 @@ POWERPC_FAMILY(POWER10)(ObjectClass *oc, void *data)
     pcc->lpcr_pm = LPCR_PDEE | LPCR_HDEE | LPCR_EEE | LPCR_DEE | LPCR_OEE;
     pcc->mmu_model = POWERPC_MMU_3_00;
 #if defined(CONFIG_SOFTMMU)
-    pcc->handle_mmu_fault = ppc64_v3_handle_mmu_fault;
     /* segment page size remain the same */
     pcc->hash64_opts = &ppc_hash64_opts_POWER7;
     pcc->radix_page_info = &POWER10_radix_page_info;
@@ -8351,7 +8287,6 @@ POWERPC_FAMILY(POWER10)(ObjectClass *oc, void *data)
                  POWERPC_FLAG_VSX | POWERPC_FLAG_TM | POWERPC_FLAG_SCV;
     pcc->l1_dcache_size = 0x8000;
     pcc->l1_icache_size = 0x8000;
-    pcc->interrupts_big_endian = ppc_cpu_interrupts_big_endian_lpcr;
 }
 
 #if !defined(CONFIG_USER_ONLY)
@@ -8545,45 +8480,6 @@ static void init_ppc_proc(PowerPCCPU *cpu)
     }
 }
 
-#if defined(PPC_DUMP_CPU)
-static void dump_ppc_sprs(CPUPPCState *env)
-{
-    ppc_spr_t *spr;
-#if !defined(CONFIG_USER_ONLY)
-    uint32_t sr, sw;
-#endif
-    uint32_t ur, uw;
-    int i, j, n;
-
-    printf("Special purpose registers:\n");
-    for (i = 0; i < 32; i++) {
-        for (j = 0; j < 32; j++) {
-            n = (i << 5) | j;
-            spr = &env->spr_cb[n];
-            uw = spr->uea_write != NULL && spr->uea_write != SPR_NOACCESS;
-            ur = spr->uea_read != NULL && spr->uea_read != SPR_NOACCESS;
-#if !defined(CONFIG_USER_ONLY)
-            sw = spr->oea_write != NULL && spr->oea_write != SPR_NOACCESS;
-            sr = spr->oea_read != NULL && spr->oea_read != SPR_NOACCESS;
-            if (sw || sr || uw || ur) {
-                printf("SPR: %4d (%03x) %-8s s%c%c u%c%c\n",
-                       (i << 5) | j, (i << 5) | j, spr->name,
-                       sw ? 'w' : '-', sr ? 'r' : '-',
-                       uw ? 'w' : '-', ur ? 'r' : '-');
-            }
-#else
-            if (uw || ur) {
-                printf("SPR: %4d (%03x) %-8s u%c%c\n",
-                       (i << 5) | j, (i << 5) | j, spr->name,
-                       uw ? 'w' : '-', ur ? 'r' : '-');
-            }
-#endif
-        }
-    }
-    fflush(stdout);
-    fflush(stderr);
-}
-#endif
 
 static void ppc_cpu_realize(DeviceState *dev, Error **errp)
 {
@@ -8620,172 +8516,6 @@ static void ppc_cpu_realize(DeviceState *dev, Error **errp)
 
     pcc->parent_realize(dev, errp);
 
-#if defined(PPC_DUMP_CPU)
-    {
-        CPUPPCState *env = &cpu->env;
-        const char *mmu_model, *excp_model, *bus_model;
-        switch (env->mmu_model) {
-        case POWERPC_MMU_32B:
-            mmu_model = "PowerPC 32";
-            break;
-        case POWERPC_MMU_SOFT_6xx:
-            mmu_model = "PowerPC 6xx/7xx with software driven TLBs";
-            break;
-        case POWERPC_MMU_SOFT_74xx:
-            mmu_model = "PowerPC 74xx with software driven TLBs";
-            break;
-        case POWERPC_MMU_SOFT_4xx:
-            mmu_model = "PowerPC 4xx with software driven TLBs";
-            break;
-        case POWERPC_MMU_SOFT_4xx_Z:
-            mmu_model = "PowerPC 4xx with software driven TLBs "
-                "and zones protections";
-            break;
-        case POWERPC_MMU_REAL:
-            mmu_model = "PowerPC real mode only";
-            break;
-        case POWERPC_MMU_MPC8xx:
-            mmu_model = "PowerPC MPC8xx";
-            break;
-        case POWERPC_MMU_BOOKE:
-            mmu_model = "PowerPC BookE";
-            break;
-        case POWERPC_MMU_BOOKE206:
-            mmu_model = "PowerPC BookE 2.06";
-            break;
-        case POWERPC_MMU_601:
-            mmu_model = "PowerPC 601";
-            break;
-#if defined(TARGET_PPC64)
-        case POWERPC_MMU_64B:
-            mmu_model = "PowerPC 64";
-            break;
-#endif
-        default:
-            mmu_model = "Unknown or invalid";
-            break;
-        }
-        switch (env->excp_model) {
-        case POWERPC_EXCP_STD:
-            excp_model = "PowerPC";
-            break;
-        case POWERPC_EXCP_40x:
-            excp_model = "PowerPC 40x";
-            break;
-        case POWERPC_EXCP_601:
-            excp_model = "PowerPC 601";
-            break;
-        case POWERPC_EXCP_602:
-            excp_model = "PowerPC 602";
-            break;
-        case POWERPC_EXCP_603:
-            excp_model = "PowerPC 603";
-            break;
-        case POWERPC_EXCP_603E:
-            excp_model = "PowerPC 603e";
-            break;
-        case POWERPC_EXCP_604:
-            excp_model = "PowerPC 604";
-            break;
-        case POWERPC_EXCP_7x0:
-            excp_model = "PowerPC 740/750";
-            break;
-        case POWERPC_EXCP_7x5:
-            excp_model = "PowerPC 745/755";
-            break;
-        case POWERPC_EXCP_74xx:
-            excp_model = "PowerPC 74xx";
-            break;
-        case POWERPC_EXCP_BOOKE:
-            excp_model = "PowerPC BookE";
-            break;
-#if defined(TARGET_PPC64)
-        case POWERPC_EXCP_970:
-            excp_model = "PowerPC 970";
-            break;
-#endif
-        default:
-            excp_model = "Unknown or invalid";
-            break;
-        }
-        switch (env->bus_model) {
-        case PPC_FLAGS_INPUT_6xx:
-            bus_model = "PowerPC 6xx";
-            break;
-        case PPC_FLAGS_INPUT_BookE:
-            bus_model = "PowerPC BookE";
-            break;
-        case PPC_FLAGS_INPUT_405:
-            bus_model = "PowerPC 405";
-            break;
-        case PPC_FLAGS_INPUT_401:
-            bus_model = "PowerPC 401/403";
-            break;
-        case PPC_FLAGS_INPUT_RCPU:
-            bus_model = "RCPU / MPC8xx";
-            break;
-#if defined(TARGET_PPC64)
-        case PPC_FLAGS_INPUT_970:
-            bus_model = "PowerPC 970";
-            break;
-#endif
-        default:
-            bus_model = "Unknown or invalid";
-            break;
-        }
-        printf("PowerPC %-12s : PVR %08x MSR %016" PRIx64 "\n"
-               "    MMU model        : %s\n",
-               object_class_get_name(OBJECT_CLASS(pcc)),
-               pcc->pvr, pcc->msr_mask, mmu_model);
-#if !defined(CONFIG_USER_ONLY)
-        if (env->tlb.tlb6) {
-            printf("                       %d %s TLB in %d ways\n",
-                   env->nb_tlb, env->id_tlbs ? "splitted" : "merged",
-                   env->nb_ways);
-        }
-#endif
-        printf("    Exceptions model : %s\n"
-               "    Bus model        : %s\n",
-               excp_model, bus_model);
-        printf("    MSR features     :\n");
-        if (env->flags & POWERPC_FLAG_SPE) {
-            printf("                        signal processing engine enable"
-                   "\n");
-        } else if (env->flags & POWERPC_FLAG_VRE) {
-            printf("                        vector processor enable\n");
-        }
-        if (env->flags & POWERPC_FLAG_TGPR) {
-            printf("                        temporary GPRs\n");
-        } else if (env->flags & POWERPC_FLAG_CE) {
-            printf("                        critical input enable\n");
-        }
-        if (env->flags & POWERPC_FLAG_SE) {
-            printf("                        single-step trace mode\n");
-        } else if (env->flags & POWERPC_FLAG_DWE) {
-            printf("                        debug wait enable\n");
-        } else if (env->flags & POWERPC_FLAG_UBLE) {
-            printf("                        user BTB lock enable\n");
-        }
-        if (env->flags & POWERPC_FLAG_BE) {
-            printf("                        branch-step trace mode\n");
-        } else if (env->flags & POWERPC_FLAG_DE) {
-            printf("                        debug interrupt enable\n");
-        }
-        if (env->flags & POWERPC_FLAG_PX) {
-            printf("                        inclusive protection\n");
-        } else if (env->flags & POWERPC_FLAG_PMM) {
-            printf("                        performance monitor mark\n");
-        }
-        if (env->flags == POWERPC_FLAG_NONE) {
-            printf("                        none\n");
-        }
-        printf("    Time-base/decrementer clock source: %s\n",
-               env->flags & POWERPC_FLAG_RTC_CLK ? "RTC clock" : "bus clock");
-        dump_ppc_insns(env);
-        dump_ppc_sprs(env);
-        fflush(stdout);
-    }
-#endif
     return;
 
 unrealize:
@@ -9117,9 +8847,11 @@ static void ppc_cpu_reset(DeviceState *dev)
 
 #if !defined(CONFIG_USER_ONLY)
     env->nip = env->hreset_vector | env->excp_prefix;
+#if defined(CONFIG_TCG)
     if (env->mmu_model != POWERPC_MMU_REAL) {
         ppc_tlb_invalidate_all(env);
     }
+#endif /* CONFIG_TCG */
 #endif
 
     hreg_compute_hflags(env);
@@ -9263,10 +8995,22 @@ static Property ppc_cpu_properties[] = {
     DEFINE_PROP_END_OF_LIST(),
 };
 
+#ifndef CONFIG_USER_ONLY
+#include "hw/core/sysemu-cpu-ops.h"
+
+static const struct SysemuCPUOps ppc_sysemu_ops = {
+    .get_phys_page_debug = ppc_cpu_get_phys_page_debug,
+    .write_elf32_note = ppc32_cpu_write_elf32_note,
+    .write_elf64_note = ppc64_cpu_write_elf64_note,
+    .virtio_is_big_endian = ppc_cpu_is_big_endian,
+    .legacy_vmsd = &vmstate_ppc_cpu,
+};
+#endif
+
 #ifdef CONFIG_TCG
 #include "hw/core/tcg-cpu-ops.h"
 
-static struct TCGCPUOps ppc_tcg_ops = {
+static const struct TCGCPUOps ppc_tcg_ops = {
   .initialize = ppc_translate_init,
   .cpu_exec_interrupt = ppc_cpu_exec_interrupt,
   .tlb_fill = ppc_cpu_tlb_fill,
@@ -9291,7 +9035,6 @@ static void ppc_cpu_class_init(ObjectClass *oc, void *data)
     device_class_set_parent_unrealize(dc, ppc_cpu_unrealize,
                                       &pcc->parent_unrealize);
     pcc->pvr_match = ppc_pvr_match_default;
-    pcc->interrupts_big_endian = ppc_cpu_interrupts_big_endian_always;
     device_class_set_props(dc, ppc_cpu_properties);
 
     device_class_set_parent_reset(dc, ppc_cpu_reset, &pcc->parent_reset);
@@ -9299,17 +9042,11 @@ static void ppc_cpu_class_init(ObjectClass *oc, void *data)
     cc->class_by_name = ppc_cpu_class_by_name;
     cc->has_work = ppc_cpu_has_work;
     cc->dump_state = ppc_cpu_dump_state;
-    cc->dump_statistics = ppc_cpu_dump_statistics;
     cc->set_pc = ppc_cpu_set_pc;
     cc->gdb_read_register = ppc_cpu_gdb_read_register;
     cc->gdb_write_register = ppc_cpu_gdb_write_register;
 #ifndef CONFIG_USER_ONLY
-    cc->get_phys_page_debug = ppc_cpu_get_phys_page_debug;
-    cc->vmsd = &vmstate_ppc_cpu;
-#endif
-#if defined(CONFIG_SOFTMMU)
-    cc->write_elf64_note = ppc64_cpu_write_elf64_note;
-    cc->write_elf32_note = ppc32_cpu_write_elf32_note;
+    cc->sysemu_ops = &ppc_sysemu_ops;
 #endif
 
     cc->gdb_num_core_regs = 71;
@@ -9327,9 +9064,6 @@ static void ppc_cpu_class_init(ObjectClass *oc, void *data)
     cc->gdb_core_xml_file = "power64-core.xml";
 #else
     cc->gdb_core_xml_file = "power-core.xml";
-#endif
-#ifndef CONFIG_USER_ONLY
-    cc->virtio_is_big_endian = ppc_cpu_is_big_endian;
 #endif
     cc->disas_set_info = ppc_disas_set_info;
 

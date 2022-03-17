@@ -89,6 +89,7 @@ struct PXBDev {
 
     uint8_t bus_nr;
     uint16_t numa_node;
+    bool bypass_iommu;
     int32_t uid;
 
     struct cxl_dev {

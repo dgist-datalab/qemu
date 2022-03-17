@@ -362,6 +362,7 @@ static void pxb_dev_realize_common(PCIDevice *dev, enum BusType type,
     bus->map_irq = pxb_map_irq_fn;
 
     PCI_HOST_BRIDGE(ds)->bus = bus;
+    PCI_HOST_BRIDGE(ds)->bypass_iommu = pxb->bypass_iommu;
 
     pxb_register_bus(dev, bus, &local_err);
     if (local_err) {
@@ -411,6 +412,7 @@ static Property pxb_dev_properties[] = {
     /* Note: 0 is not a legal PXB bus number. */
     DEFINE_PROP_UINT8("bus_nr", PXBDev, bus_nr, 0),
     DEFINE_PROP_UINT16("numa_node", PXBDev, numa_node, NUMA_NODE_UNASSIGNED),
+    DEFINE_PROP_BOOL("bypass_iommu", PXBDev, bypass_iommu, false),
     DEFINE_PROP_INT32("uid", PXBDev, uid, -1),
     DEFINE_PROP_ARRAY("window-base", PXBDev, cxl.num_windows, cxl.window_base,
                       qdev_prop_uint64, hwaddr),

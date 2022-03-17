@@ -7,8 +7,6 @@ config MEM_DEVICE
 
 config NVDIMM
     bool
-    default y
-    depends on (PC || PSERIES || ARM_VIRT)
     select MEM_DEVICE
 
 config CXL_MEM_DEVICE

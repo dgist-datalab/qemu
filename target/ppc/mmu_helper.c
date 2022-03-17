@@ -20,13 +20,11 @@
 #include "qemu/osdep.h"
 #include "qemu/units.h"
 #include "cpu.h"
-#include "exec/helper-proto.h"
 #include "sysemu/kvm.h"
 #include "kvm_ppc.h"
 #include "mmu-hash64.h"
 #include "mmu-hash32.h"
 #include "exec/exec-all.h"
-#include "exec/cpu_ldst.h"
 #include "exec/log.h"
 #include "helper_regs.h"
 #include "qemu/error-report.h"
@@ -36,6 +34,10 @@
 #include "mmu-book3s-v3.h"
 #include "mmu-radix64.h"
 
+#ifdef CONFIG_TCG
+#include "exec/helper-proto.h"
+#include "exec/cpu_ldst.h"
+#endif
 /* #define DEBUG_MMU */
 /* #define DEBUG_BATS */
 /* #define DEBUG_SOFTWARE_TLB */
@@ -268,6 +270,7 @@ static inline void ppc6xx_tlb_invalidate_virt(CPUPPCState *env,
     ppc6xx_tlb_invalidate_virt2(env, eaddr, is_code, 0);
 }
 
+#ifdef CONFIG_TCG
 static void ppc6xx_tlb_store(CPUPPCState *env, target_ulong EPN, int way,
                              int is_code, target_ulong pte0, target_ulong pte1)
 {
@@ -286,6 +289,7 @@ static void ppc6xx_tlb_store(CPUPPCState *env, target_ulong EPN, int way,
     /* Store last way for LRU mechanism */
     env->last_way = way;
 }
+#endif
 
 static int ppc6xx_tlb_check(CPUPPCState *env, mmu_ctx_t *ctx,
                             target_ulong eaddr, MMUAccessType access_type)
@@ -507,7 +511,7 @@ static int get_segment_6xx_tlb(CPUPPCState *env, mmu_ctx_t *ctx,
 
                 qemu_log("Page table: " TARGET_FMT_plx " len " TARGET_FMT_plx
                          "\n", ppc_hash32_hpt_base(cpu),
-                         ppc_hash32_hpt_mask(env) + 0x80);
+                         ppc_hash32_hpt_mask(cpu) + 0x80);
                 for (curaddr = ppc_hash32_hpt_base(cpu);
                      curaddr < (ppc_hash32_hpt_base(cpu)
                                 + ppc_hash32_hpt_mask(cpu) + 0x80);
@@ -626,6 +630,7 @@ static int ppcemb_tlb_check(CPUPPCState *env, ppcemb_tlb_t *tlb,
     return 0;
 }
 
+#ifdef CONFIG_TCG
 /* Generic TLB search function for PowerPC embedded implementations */
 static int ppcemb_tlb_search(CPUPPCState *env, target_ulong address,
                              uint32_t pid)
@@ -646,6 +651,7 @@ static int ppcemb_tlb_search(CPUPPCState *env, target_ulong address,
 
     return ret;
 }
+#endif
 
 /* Helpers specific to PowerPC 40x implementations */
 static inline void ppc4xx_tlb_invalidate_all(CPUPPCState *env)
@@ -819,6 +825,7 @@ static int mmubooke_get_physical_address(CPUPPCState *env, mmu_ctx_t *ctx,
     return ret;
 }
 
+#ifdef CONFIG_TCG
 static void booke206_flush_tlb(CPUPPCState *env, int flags,
                                const int check_iprot)
 {
@@ -840,6 +847,7 @@ static void booke206_flush_tlb(CPUPPCState *env, int flags,
 
     tlb_flush(env_cpu(env));
 }
+#endif
 
 static hwaddr booke206_tlb_to_page_size(CPUPPCState *env,
                                         ppcmas_tlb_t *tlb)
@@ -1420,54 +1428,14 @@ static int get_physical_address_wtlb(CPUPPCState *env, mmu_ctx_t *ctx,
     return ret;
 }
 
+#ifdef CONFIG_TCG
 static int get_physical_address(CPUPPCState *env, mmu_ctx_t *ctx,
                                 target_ulong eaddr, MMUAccessType access_type,
                                 int type)
 {
     return get_physical_address_wtlb(env, ctx, eaddr, access_type, type, 0);
 }
-
-hwaddr ppc_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)
-{
-    PowerPCCPU *cpu = POWERPC_CPU(cs);
-    CPUPPCState *env = &cpu->env;
-    mmu_ctx_t ctx;
-
-    switch (env->mmu_model) {
-#if defined(TARGET_PPC64)
-    case POWERPC_MMU_64B:
-    case POWERPC_MMU_2_03:
-    case POWERPC_MMU_2_06:
-    case POWERPC_MMU_2_07:
-        return ppc_hash64_get_phys_page_debug(cpu, addr);
-    case POWERPC_MMU_3_00:
-        return ppc64_v3_get_phys_page_debug(cpu, addr);
 #endif
-
-    case POWERPC_MMU_32B:
-    case POWERPC_MMU_601:
-        return ppc_hash32_get_phys_page_debug(cpu, addr);
-
-    default:
-        ;
-    }
-
-    if (unlikely(get_physical_address(env, &ctx, addr, MMU_DATA_LOAD,
-                                      ACCESS_INT) != 0)) {
-
-        /*
-         * Some MMUs have separate TLBs for code and data. If we only
-         * try an ACCESS_INT, we may not be able to read instructions
-         * mapped by code TLBs, so we also try a ACCESS_CODE.
-         */
-        if (unlikely(get_physical_address(env, &ctx, addr, MMU_INST_FETCH,
-                                          ACCESS_CODE) != 0)) {
-            return -1;
-        }
-    }
-
-    return ctx.raddr & TARGET_PAGE_MASK;
-}
 
 static void booke206_update_mas_tlb_miss(CPUPPCState *env, target_ulong address,
                                          MMUAccessType access_type, int mmu_idx)
@@ -1524,30 +1492,38 @@ static void booke206_update_mas_tlb_miss(CPUPPCState *env, target_ulong address,
 }
 
 /* Perform address translation */
-static int cpu_ppc_handle_mmu_fault(CPUPPCState *env, target_ulong address,
-                                    MMUAccessType access_type, int mmu_idx)
+/* TODO: Split this by mmu_model. */
+static bool ppc_jumbo_xlate(PowerPCCPU *cpu, vaddr eaddr,
+                            MMUAccessType access_type,
+                            hwaddr *raddrp, int *psizep, int *protp,
+                            int mmu_idx, bool guest_visible)
 {
-    CPUState *cs = env_cpu(env);
-    PowerPCCPU *cpu = POWERPC_CPU(cs);
+    CPUState *cs = CPU(cpu);
+    CPUPPCState *env = &cpu->env;
     mmu_ctx_t ctx;
     int type;
-    int ret = 0;
+    int ret;
 
     if (access_type == MMU_INST_FETCH) {
         /* code access */
         type = ACCESS_CODE;
-    } else {
+    } else if (guest_visible) {
         /* data access */
         type = env->access_type;
+    } else {
+        type = ACCESS_INT;
     }
-    ret = get_physical_address_wtlb(env, &ctx, address, access_type,
+
+    ret = get_physical_address_wtlb(env, &ctx, eaddr, access_type,
                                     type, mmu_idx);
     if (ret == 0) {
-        tlb_set_page(cs, address & TARGET_PAGE_MASK,
-                     ctx.raddr & TARGET_PAGE_MASK, ctx.prot,
-                     mmu_idx, TARGET_PAGE_SIZE);
-        ret = 0;
-    } else if (ret < 0) {
+        *raddrp = ctx.raddr;
+        *protp = ctx.prot;
+        *psizep = TARGET_PAGE_BITS;
+        return true;
+    }
+
+    if (guest_visible) {
         LOG_MMU_STATE(cs);
         if (type == ACCESS_CODE) {
             switch (ret) {
@@ -1557,7 +1533,7 @@ static int cpu_ppc_handle_mmu_fault(CPUPPCState *env, target_ulong address,
                 case POWERPC_MMU_SOFT_6xx:
                     cs->exception_index = POWERPC_EXCP_IFTLB;
                     env->error_code = 1 << 18;
-                    env->spr[SPR_IMISS] = address;
+                    env->spr[SPR_IMISS] = eaddr;
                     env->spr[SPR_ICMP] = 0x80000000 | ctx.ptem;
                     goto tlb_miss;
                 case POWERPC_MMU_SOFT_74xx:
@@ -1567,29 +1543,25 @@ static int cpu_ppc_handle_mmu_fault(CPUPPCState *env, target_ulong address,
                 case POWERPC_MMU_SOFT_4xx_Z:
                     cs->exception_index = POWERPC_EXCP_ITLB;
                     env->error_code = 0;
-                    env->spr[SPR_40x_DEAR] = address;
+                    env->spr[SPR_40x_DEAR] = eaddr;
                     env->spr[SPR_40x_ESR] = 0x00000000;
                     break;
                 case POWERPC_MMU_BOOKE206:
-                    booke206_update_mas_tlb_miss(env, address, 2, mmu_idx);
+                    booke206_update_mas_tlb_miss(env, eaddr, 2, mmu_idx);
                     /* fall through */
                 case POWERPC_MMU_BOOKE:
                     cs->exception_index = POWERPC_EXCP_ITLB;
                     env->error_code = 0;
-                    env->spr[SPR_BOOKE_DEAR] = address;
+                    env->spr[SPR_BOOKE_DEAR] = eaddr;
                     env->spr[SPR_BOOKE_ESR] = mmubooke206_esr(mmu_idx, MMU_DATA_LOAD);
-                    return -1;
-                case POWERPC_MMU_MPC8xx:
-                    /* XXX: TODO */
-                    cpu_abort(cs, "MPC8xx MMU model is not implemented\n");
                     break;
+                case POWERPC_MMU_MPC8xx:
+                    cpu_abort(cs, "MPC8xx MMU model is not implemented\n");
                 case POWERPC_MMU_REAL:
                     cpu_abort(cs, "PowerPC in real mode should never raise "
                               "any MMU exceptions\n");
-                    return -1;
                 default:
                     cpu_abort(cs, "Unknown or invalid MMU model\n");
-                    return -1;
                 }
                 break;
             case -2:
@@ -1626,7 +1598,7 @@ static int cpu_ppc_handle_mmu_fault(CPUPPCState *env, target_ulong address,
                         cs->exception_index = POWERPC_EXCP_DLTLB;
                         env->error_code = 0;
                     }
-                    env->spr[SPR_DMISS] = address;
+                    env->spr[SPR_DMISS] = eaddr;
                     env->spr[SPR_DCMP] = 0x80000000 | ctx.ptem;
                 tlb_miss:
                     env->error_code |= ctx.key << 19;
@@ -1644,7 +1616,7 @@ static int cpu_ppc_handle_mmu_fault(CPUPPCState *env, target_ulong address,
                 tlb_miss_74xx:
                     /* Implement LRU algorithm */
                     env->error_code = ctx.key << 19;
-                    env->spr[SPR_TLBMISS] = (address & ~((target_ulong)0x3)) |
+                    env->spr[SPR_TLBMISS] = (eaddr & ~((target_ulong)0x3)) |
                         ((env->last_way + 1) & (env->nb_ways - 1));
                     env->spr[SPR_PTEHI] = 0x80000000 | ctx.ptem;
                     break;
@@ -1652,7 +1624,7 @@ static int cpu_ppc_handle_mmu_fault(CPUPPCState *env, target_ulong address,
                 case POWERPC_MMU_SOFT_4xx_Z:
                     cs->exception_index = POWERPC_EXCP_DTLB;
                     env->error_code = 0;
-                    env->spr[SPR_40x_DEAR] = address;
+                    env->spr[SPR_40x_DEAR] = eaddr;
                     if (access_type == MMU_DATA_STORE) {
                         env->spr[SPR_40x_ESR] = 0x00800000;
                     } else {
@@ -1662,23 +1634,20 @@ static int cpu_ppc_handle_mmu_fault(CPUPPCState *env, target_ulong address,
                 case POWERPC_MMU_MPC8xx:
                     /* XXX: TODO */
                     cpu_abort(cs, "MPC8xx MMU model is not implemented\n");
-                    break;
                 case POWERPC_MMU_BOOKE206:
-                    booke206_update_mas_tlb_miss(env, address, access_type, mmu_idx);
+                    booke206_update_mas_tlb_miss(env, eaddr, access_type, mmu_idx);
                     /* fall through */
                 case POWERPC_MMU_BOOKE:
                     cs->exception_index = POWERPC_EXCP_DTLB;
                     env->error_code = 0;
-                    env->spr[SPR_BOOKE_DEAR] = address;
+                    env->spr[SPR_BOOKE_DEAR] = eaddr;
                     env->spr[SPR_BOOKE_ESR] = mmubooke206_esr(mmu_idx, access_type);
-                    return -1;
+                    break;
                 case POWERPC_MMU_REAL:
                     cpu_abort(cs, "PowerPC in real mode should never raise "
                               "any MMU exceptions\n");
-                    return -1;
                 default:
                     cpu_abort(cs, "Unknown or invalid MMU model\n");
-                    return -1;
                 }
                 break;
             case -2:
@@ -1687,16 +1656,16 @@ static int cpu_ppc_handle_mmu_fault(CPUPPCState *env, target_ulong address,
                 env->error_code = 0;
                 if (env->mmu_model == POWERPC_MMU_SOFT_4xx
                     || env->mmu_model == POWERPC_MMU_SOFT_4xx_Z) {
-                    env->spr[SPR_40x_DEAR] = address;
+                    env->spr[SPR_40x_DEAR] = eaddr;
                     if (access_type == MMU_DATA_STORE) {
                         env->spr[SPR_40x_ESR] |= 0x00800000;
                     }
                 } else if ((env->mmu_model == POWERPC_MMU_BOOKE) ||
                            (env->mmu_model == POWERPC_MMU_BOOKE206)) {
-                    env->spr[SPR_BOOKE_DEAR] = address;
+                    env->spr[SPR_BOOKE_DEAR] = eaddr;
                     env->spr[SPR_BOOKE_ESR] = mmubooke206_esr(mmu_idx, access_type);
                 } else {
-                    env->spr[SPR_DAR] = address;
+                    env->spr[SPR_DAR] = eaddr;
                     if (access_type == MMU_DATA_STORE) {
                         env->spr[SPR_DSISR] = 0x0A000000;
                     } else {
@@ -1711,13 +1680,13 @@ static int cpu_ppc_handle_mmu_fault(CPUPPCState *env, target_ulong address,
                     /* Floating point load/store */
                     cs->exception_index = POWERPC_EXCP_ALIGN;
                     env->error_code = POWERPC_EXCP_ALIGN_FP;
-                    env->spr[SPR_DAR] = address;
+                    env->spr[SPR_DAR] = eaddr;
                     break;
                 case ACCESS_RES:
                     /* lwarx, ldarx or stwcx. */
                     cs->exception_index = POWERPC_EXCP_DSI;
                     env->error_code = 0;
-                    env->spr[SPR_DAR] = address;
+                    env->spr[SPR_DAR] = eaddr;
                     if (access_type == MMU_DATA_STORE) {
                         env->spr[SPR_DSISR] = 0x06000000;
                     } else {
@@ -1728,7 +1697,7 @@ static int cpu_ppc_handle_mmu_fault(CPUPPCState *env, target_ulong address,
                     /* eciwx or ecowx */
                     cs->exception_index = POWERPC_EXCP_DSI;
                     env->error_code = 0;
-                    env->spr[SPR_DAR] = address;
+                    env->spr[SPR_DAR] = eaddr;
                     if (access_type == MMU_DATA_STORE) {
                         env->spr[SPR_DSISR] = 0x06100000;
                     } else {
@@ -1740,18 +1709,17 @@ static int cpu_ppc_handle_mmu_fault(CPUPPCState *env, target_ulong address,
                     cs->exception_index = POWERPC_EXCP_PROGRAM;
                     env->error_code =
                         POWERPC_EXCP_INVAL | POWERPC_EXCP_INVAL_INVAL;
-                    env->spr[SPR_DAR] = address;
+                    env->spr[SPR_DAR] = eaddr;
                     break;
                 }
                 break;
             }
         }
-        ret = 1;
     }
-
-    return ret;
+    return false;
 }
 
+#ifdef CONFIG_TCG
 /*****************************************************************************/
 /* BATs management */
 #if !defined(FLUSH_ALL_TLBS)
@@ -1789,9 +1757,6 @@ static inline void dump_store_bat(CPUPPCState *env, char ID, int ul, int nr,
 void helper_store_ibatu(CPUPPCState *env, uint32_t nr, target_ulong value)
 {
     target_ulong mask;
-#if defined(FLUSH_ALL_TLBS)
-    PowerPCCPU *cpu = env_archcpu(env);
-#endif
 
     dump_store_bat(env, 'I', 0, nr, value);
     if (env->IBAT[0][nr] != value) {
@@ -1825,9 +1790,6 @@ void helper_store_ibatl(CPUPPCState *env, uint32_t nr, target_ulong value)
 void helper_store_dbatu(CPUPPCState *env, uint32_t nr, target_ulong value)
 {
     target_ulong mask;
-#if defined(FLUSH_ALL_TLBS)
-    PowerPCCPU *cpu = env_archcpu(env);
-#endif
 
     dump_store_bat(env, 'D', 0, nr, value);
     if (env->DBAT[0][nr] != value) {
@@ -1862,7 +1824,6 @@ void helper_store_601_batu(CPUPPCState *env, uint32_t nr, target_ulong value)
 {
     target_ulong mask;
 #if defined(FLUSH_ALL_TLBS)
-    PowerPCCPU *cpu = env_archcpu(env);
     int do_inval;
 #endif
 
@@ -1907,7 +1868,6 @@ void helper_store_601_batl(CPUPPCState *env, uint32_t nr, target_ulong value)
 #if !defined(FLUSH_ALL_TLBS)
     target_ulong mask;
 #else
-    PowerPCCPU *cpu = env_archcpu(env);
     int do_inval;
 #endif
 
@@ -1941,7 +1901,9 @@ void helper_store_601_batl(CPUPPCState *env, uint32_t nr, target_ulong value)
 #endif
     }
 }
+#endif
 
+#ifdef CONFIG_TCG
 /*****************************************************************************/
 /* TLB management */
 void ppc_tlb_invalidate_all(CPUPPCState *env)
@@ -1985,7 +1947,9 @@ void ppc_tlb_invalidate_all(CPUPPCState *env)
         break;
     }
 }
+#endif
 
+#ifdef CONFIG_TCG
 void ppc_tlb_invalidate_one(CPUPPCState *env, target_ulong addr)
 {
 #if !defined(FLUSH_ALL_TLBS)
@@ -2030,34 +1994,6 @@ void ppc_tlb_invalidate_one(CPUPPCState *env, target_ulong addr)
 
 /*****************************************************************************/
 /* Special registers manipulation */
-#if defined(TARGET_PPC64)
-void ppc_store_ptcr(CPUPPCState *env, target_ulong value)
-{
-    PowerPCCPU *cpu = env_archcpu(env);
-    target_ulong ptcr_mask = PTCR_PATB | PTCR_PATS;
-    target_ulong patbsize = value & PTCR_PATS;
-
-    qemu_log_mask(CPU_LOG_MMU, "%s: " TARGET_FMT_lx "\n", __func__, value);
-
-    assert(!cpu->vhyp);
-    assert(env->mmu_model & POWERPC_MMU_3_00);
-
-    if (value & ~ptcr_mask) {
-        error_report("Invalid bits 0x"TARGET_FMT_lx" set in PTCR",
-                     value & ~ptcr_mask);
-        value &= ptcr_mask;
-    }
-
-    if (patbsize > 24) {
-        error_report("Invalid Partition Table size 0x" TARGET_FMT_lx
-                     " stored in PTCR", patbsize);
-        return;
-    }
-
-    env->spr[SPR_PTCR] = value;
-}
-
-#endif /* defined(TARGET_PPC64) */
 
 /* Segment registers load and store */
 target_ulong helper_load_sr(CPUPPCState *env, target_ulong sr_num)
@@ -2955,29 +2891,80 @@ void helper_check_tlb_flush_global(CPUPPCState *env)
 {
     check_tlb_flush(env, true);
 }
+#endif /* CONFIG_TCG */
 
 /*****************************************************************************/
 
-bool ppc_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
+static bool ppc_xlate(PowerPCCPU *cpu, vaddr eaddr, MMUAccessType access_type,
+                      hwaddr *raddrp, int *psizep, int *protp,
+                      int mmu_idx, bool guest_visible)
+{
+    switch (cpu->env.mmu_model) {
+#if defined(TARGET_PPC64)
+    case POWERPC_MMU_3_00:
+        if (ppc64_v3_radix(cpu)) {
+            return ppc_radix64_xlate(cpu, eaddr, access_type,
+                                     raddrp, psizep, protp, mmu_idx, guest_visible);
+        }
+        /* fall through */
+    case POWERPC_MMU_64B:
+    case POWERPC_MMU_2_03:
+    case POWERPC_MMU_2_06:
+    case POWERPC_MMU_2_07:
+        return ppc_hash64_xlate(cpu, eaddr, access_type,
+                                raddrp, psizep, protp, mmu_idx, guest_visible);
+#endif
+
+    case POWERPC_MMU_32B:
+    case POWERPC_MMU_601:
+        return ppc_hash32_xlate(cpu, eaddr, access_type,
+                                raddrp, psizep, protp, mmu_idx, guest_visible);
+
+    default:
+        return ppc_jumbo_xlate(cpu, eaddr, access_type, raddrp,
+                               psizep, protp, mmu_idx, guest_visible);
+    }
+}
+
+hwaddr ppc_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)
+{
+    PowerPCCPU *cpu = POWERPC_CPU(cs);
+    hwaddr raddr;
+    int s, p;
+
+    /*
+     * Some MMUs have separate TLBs for code and data. If we only
+     * try an MMU_DATA_LOAD, we may not be able to read instructions
+     * mapped by code TLBs, so we also try a MMU_INST_FETCH.
+     */
+    if (ppc_xlate(cpu, addr, MMU_DATA_LOAD, &raddr, &s, &p,
+                  cpu_mmu_index(&cpu->env, false), false) ||
+        ppc_xlate(cpu, addr, MMU_INST_FETCH, &raddr, &s, &p,
+                  cpu_mmu_index(&cpu->env, true), false)) {
+        return raddr & TARGET_PAGE_MASK;
+    }
+    return -1;
+}
+
+#ifdef CONFIG_TCG
+bool ppc_cpu_tlb_fill(CPUState *cs, vaddr eaddr, int size,
                       MMUAccessType access_type, int mmu_idx,
                       bool probe, uintptr_t retaddr)
 {
     PowerPCCPU *cpu = POWERPC_CPU(cs);
-    PowerPCCPUClass *pcc = POWERPC_CPU_GET_CLASS(cs);
-    CPUPPCState *env = &cpu->env;
-    int ret;
+    hwaddr raddr;
+    int page_size, prot;
 
-    if (pcc->handle_mmu_fault) {
-        ret = pcc->handle_mmu_fault(cpu, addr, access_type, mmu_idx);
-    } else {
-        ret = cpu_ppc_handle_mmu_fault(env, addr, access_type, mmu_idx);
+    if (ppc_xlate(cpu, eaddr, access_type, &raddr,
+                  &page_size, &prot, mmu_idx, !probe)) {
+        tlb_set_page(cs, eaddr & TARGET_PAGE_MASK, raddr & TARGET_PAGE_MASK,
+                     prot, mmu_idx, 1UL << page_size);
+        return true;
     }
-    if (unlikely(ret != 0)) {
-        if (probe) {
-            return false;
-        }
-        raise_exception_err_ra(env, cs->exception_index, env->error_code,
-                               retaddr);
+    if (probe) {
+        return false;
     }
-    return true;
+    raise_exception_err_ra(&cpu->env, cs->exception_index,
+                           cpu->env.error_code, retaddr);
 }
+#endif
